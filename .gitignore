@@ -1,0 +1,11 @@
+# Local task materials and method references
+instructions/
+AGENTS.md
+CHECKLIST.md
+
+# Local Python virtual environment
+.venv/
+
+# Local Git hook files and hook helper directories
+hooks/
+*.hook
