@@ -6,6 +6,10 @@ CHECKLIST.md
 # Local Python virtual environment
 .venv/
 
+# Python cache files
+__pycache__/
+*.py[cod]
+
 # Local Git hook files and hook helper directories
 hooks/
 *.hook
