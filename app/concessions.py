@@ -6,7 +6,7 @@ This module must stay independent from Qt.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from math import isclose
+from math import isclose, isfinite
 
 from app.models import Alternative, ConcessionResult, ConcessionStep, Criterion, Direction
 
@@ -213,7 +213,7 @@ def _ensure_unique_names(names: Sequence[str], entity_name: str) -> None:
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
 
 
 def _calculate_boundary(optimum: float, criterion: Criterion) -> tuple[float, float]:

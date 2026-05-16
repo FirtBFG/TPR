@@ -9,6 +9,8 @@ CHECKLIST.md
 # Python cache files
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.coverage
 
 # Local Git hook files and hook helper directories
 hooks/
