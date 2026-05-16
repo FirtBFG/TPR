@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.concessions import solve_concession_method
 from app.examples import DecisionExample, get_example_1, get_example_2, get_variant_22
+from app.models import Alternative, ConcessionResult, Criterion
 
 
 DATA_MIN_WIDTH = 560
@@ -112,7 +114,7 @@ class MainWindow(QMainWindow):
         layout = QGridLayout(group)
 
         calculate_button = QPushButton("Рассчитать")
-        calculate_button.clicked.connect(self._show_calculation_placeholder)
+        calculate_button.clicked.connect(self.calculate)
 
         clear_button = QPushButton("Очистить")
         clear_button.clicked.connect(self.clear_tables)
@@ -160,6 +162,25 @@ class MainWindow(QMainWindow):
 
     def clear_tables(self) -> None:
         self.create_tables()
+
+    def calculate(self) -> None:
+        try:
+            alternatives = self._read_alternatives()
+            criteria = self._read_criteria()
+        except ValueError as error:
+            message = str(error)
+            self._show_error(message)
+            self.result_output.setPlainText(f"Расчёт не выполнен.\n\n{message}")
+            return
+
+        result = solve_concession_method(alternatives, criteria)
+        if not result.success:
+            message = result.error_message or "Не удалось выполнить расчёт."
+            self._show_error(message)
+            self.result_output.setPlainText(f"Расчёт не выполнен.\n\n{message}")
+            return
+
+        self.result_output.setPlainText(self._format_result(result))
 
     def load_example(self, example: DecisionExample) -> None:
         self.alternative_count_input.setValue(len(example.alternatives))
@@ -220,12 +241,105 @@ class MainWindow(QMainWindow):
 
         self.criteria_table.resizeColumnsToContents()
 
-    def _show_calculation_placeholder(self) -> None:
-        QMessageBox.information(
-            self,
-            "Расчёт",
-            "Расчёт будет подключён на следующем пит-стопе.",
-        )
+    def _read_alternatives(self) -> list[Alternative]:
+        criteria_names = [self._table_text(self.criteria_table, row, 0) for row in range(self.criteria_table.rowCount())]
+        alternatives: list[Alternative] = []
+
+        for row in range(self.data_table.rowCount()):
+            alternative_name = self._table_text(self.data_table, row, 0)
+            if not alternative_name:
+                raise ValueError(f"Строка {row + 1}: у альтернативы не задано название.")
+
+            values: dict[str, float] = {}
+            for column, criterion_name in enumerate(criteria_names, start=1):
+                raw_value = self._table_text(self.data_table, row, column)
+                values[criterion_name] = self._parse_float(
+                    raw_value,
+                    f"Строка {row + 1}, критерий {criterion_name}",
+                )
+            alternatives.append(Alternative(alternative_name, values))
+
+        return alternatives
+
+    def _read_criteria(self) -> list[Criterion]:
+        criteria: list[Criterion] = []
+
+        for row in range(self.criteria_table.rowCount()):
+            criterion_name = self._table_text(self.criteria_table, row, 0)
+            if not criterion_name:
+                raise ValueError(f"Строка критериев {row + 1}: не задано название критерия.")
+
+            direction = self._combo_text(self.criteria_table, row, 1)
+            concession_type = self._combo_text(self.criteria_table, row, 3)
+            priority = self._parse_int(
+                self._table_text(self.criteria_table, row, 2),
+                f"Критерий {criterion_name}: порядок важности",
+            )
+            concession_text = self._table_text(self.criteria_table, row, 4)
+            concession = (
+                None
+                if concession_text == ""
+                else self._parse_float(concession_text, f"Критерий {criterion_name}: уступка")
+            )
+
+            criteria.append(
+                Criterion(
+                    name=criterion_name,
+                    direction=direction,  # type: ignore[arg-type]
+                    priority=priority,
+                    concession=concession,
+                    concession_type=concession_type,  # type: ignore[arg-type]
+                )
+            )
+
+        return criteria
+
+    def _format_result(self, result: ConcessionResult) -> str:
+        lines = [
+            "Результат расчёта методом уступок",
+            "",
+            f"Итоговая альтернатива: {', '.join(result.winners)}",
+            f"Итоговое множество после уступок: {', '.join(result.final_alternatives)}",
+            "",
+            "Пошаговый протокол:",
+        ]
+
+        for step in result.steps:
+            applied_concession = (
+                "не применяется"
+                if step.applied_concession is None
+                else self._format_number(step.applied_concession)
+            )
+            boundary = (
+                "не применяется"
+                if step.boundary_value is None
+                else self._format_number(step.boundary_value)
+            )
+            remaining = ", ".join(step.remaining_alternatives) or "нет"
+            excluded = ", ".join(step.excluded_alternatives) or "нет"
+
+            lines.extend(
+                [
+                    "",
+                    f"Шаг {step.step_number}. Критерий {step.criterion} ({step.direction})",
+                    f"Оптимальное значение: {self._format_number(step.optimum_value)}",
+                    f"Уступка: {applied_concession}",
+                    f"Граница: {boundary}",
+                    f"Ограничение: {step.constraint_description}",
+                    f"Остались: {remaining}",
+                    f"Исключены: {excluded}",
+                ]
+            )
+
+        lines.extend(["", "Исключённые альтернативы по шагам:"])
+        for step in result.steps:
+            excluded = ", ".join(step.excluded_alternatives) or "нет"
+            lines.append(f"Шаг {step.step_number}, {step.criterion}: {excluded}")
+
+        return "\n".join(lines)
+
+    def _show_error(self, message: str) -> None:
+        QMessageBox.warning(self, "Ошибка ввода", message)
 
     @staticmethod
     def _make_combo(values: list[str]) -> QComboBox:
@@ -247,6 +361,38 @@ class MainWindow(QMainWindow):
         item = QTableWidgetItem(value)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         table.setItem(row, column, item)
+
+    @staticmethod
+    def _table_text(table: QTableWidget, row: int, column: int) -> str:
+        item = table.item(row, column)
+        return "" if item is None else item.text().strip()
+
+    @staticmethod
+    def _combo_text(table: QTableWidget, row: int, column: int) -> str:
+        widget = table.cellWidget(row, column)
+        if isinstance(widget, QComboBox):
+            return widget.currentText().strip()
+        return ""
+
+    @staticmethod
+    def _parse_float(value: str, field_name: str) -> float:
+        normalized = value.strip().replace(",", ".")
+        if not normalized:
+            raise ValueError(f"{field_name}: значение должно быть заполнено.")
+        try:
+            return float(normalized)
+        except ValueError as error:
+            raise ValueError(f"{field_name}: значение должно быть числом.") from error
+
+    @staticmethod
+    def _parse_int(value: str, field_name: str) -> int:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{field_name}: значение должно быть заполнено.")
+        try:
+            return int(normalized)
+        except ValueError as error:
+            raise ValueError(f"{field_name}: значение должно быть целым числом.") from error
 
     @staticmethod
     def _format_number(value: float) -> str:
