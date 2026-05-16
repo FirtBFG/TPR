@@ -12,6 +12,11 @@ __pycache__/
 .pytest_cache/
 .coverage
 
+# Build artifacts
+dist/
+build/pyinstaller/
+build/*.spec
+
 # Local Git hook files and hook helper directories
 hooks/
 *.hook
