@@ -13,7 +13,6 @@ __pycache__/
 .coverage
 
 # Build artifacts
-dist/
 build/pyinstaller/
 build/*.spec
 
